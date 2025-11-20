@@ -1,7 +1,4 @@
 # app.py
-# X-Tutor — Single-file modular Streamlit app with CLI fallback
-# Run: streamlit run app.py  (if streamlit installed)
-# or:   python app.py        (CLI fallback)
 
 import os
 import sys
@@ -345,28 +342,80 @@ def load_pdf_pages_from_fileobj(file_obj):
             pass
     return pages
 
-# ---------------------------
-# Worksheet generator (simple)
-# ---------------------------
-def generate_ratio_questions_local(n):
-    qs = []
-    examples = [(16,32),(160,200),(12,18),(5,20),(9,12)]
-    for pair in examples:
-        if len(qs) < n:
-            qs.append(f"Find the ratio of {pair[0]} and {pair[1]}.")
-    while len(qs) < n:
-        a = random.randint(2,200); b = random.randint(2,200)
-        qs.append(f"Find the ratio of {a} and {b}.")
-    return qs[:n]
 
+# Worksheet generator
+
+
+import random
+import re
+import math
+
+# --- MAIN GENERATOR FUNCTION ---
+def generate_questions(topic, n):
+    """Generate worksheet questions based on selected topic."""
+    if topic == "Ratio":
+        return generate_ratio_questions(n)
+
+    elif topic == "Multiplication":
+        return [f"{random.randint(2,12)} × {random.randint(2,12)} = ?" for _ in range(n)]
+
+    elif topic == "Fractions":
+        qs = []
+        for _ in range(n):
+            a, b = random.randint(1,9), random.randint(2,9)
+            c, d = random.randint(1,9), random.randint(2,9)
+            qs.append(f"{a}/{b} + {c}/{d} = ?")
+        return qs
+
+    elif topic == "Percentage":
+        qs = []
+        for _ in range(n):
+            num = random.randint(50, 500)
+            perc = random.choice([5,10,15,20,25,30])
+            qs.append(f"Find {perc}% of {num}.")
+        return qs
+
+    elif topic == "Word Problems":
+        return [
+            "Ali has 5 pencils. He buys 7 more. How many pencils now?",
+            "Sara had 20 mangoes. She gave 6 away. How many mangoes left?",
+            "A bag has 45 candies. 15 were eaten. How many remain?",
+        ][:n]
+
+    # fallback
+    return [f"Question {i+1}" for i in range(n)]
+
+
+# --- RATIO QUESTIONS (your code improved) ---
+def generate_ratio_questions(n):
+    qs = []
+    examples = [(16, 32), (160, 200), (12, 18), (5, 20), (9, 12)]
+
+    # use examples first
+    for a, b in examples:
+        if len(qs) < n:
+            qs.append(f"Find the ratio of {a} and {b}.")
+
+    # fill remaining
+    while len(qs) < n:
+        a, b = random.randint(2, 200), random.randint(2, 200)
+        qs.append(f"Find the ratio of {a} and {b}.")
+
+    return qs
+
+
+# --- RATIO ANSWER CALCULATOR (clean & safe) ---
 def simplify_ratio_text(q_text):
     nums = re.findall(r"-?\d+", q_text)
     if len(nums) >= 2:
-        a=int(nums[0]); b=int(nums[1])
-        if a==0 and b==0:
+        a, b = int(nums[0]), int(nums[1])
+
+        if a == 0 and b == 0:
             return "Undefined (both zero)"
-        g=math.gcd(a,b)
-        return f"{a//g}:{b//g} (from {a}:{b}, GCD={g})"
+
+        g = math.gcd(a, b)
+        return f"{a//g} : {b//g}"
+
     return "Could not parse numbers."
 
 # ---------------------------
@@ -446,12 +495,22 @@ def run_streamlit():
     with left_col:
         question = st.text_area("Type your question here:", height=160, placeholder="e.g. x+2=5 or 2x+5=20")
         st.markdown("### Worksheet generator")
-        ws_topic = st.selectbox("Worksheet topic", ["Ratio","Absolute value","Decimals","Fractions"])
+
+        # Updated topic list
+        ws_topic = st.selectbox(
+            "Worksheet topic",
+            ["Ratio", "Multiplication", "Fractions", "Percentage", "Word Problems"]
+        )
+
         ws_n = st.number_input("Number of questions", min_value=5, max_value=50, value=12)
+
         if st.button("Preview worksheet"):
-            qs = generate_ratio_questions_local(ws_n) if ws_topic=="Ratio" else [f"Question {i+1}" for i in range(ws_n)]
-            st.write("Preview:")
-            for i,q in enumerate(qs, start=1):
+
+            # NEW universal generator
+            qs = generate_questions(ws_topic, ws_n)
+
+            st.markdown("### Preview:")
+            for i, q in enumerate(qs, start=1):
                 st.write(f"{i}. {q}")
 
         use_context = st.checkbox("Use selected textbook page as context", value=True)
