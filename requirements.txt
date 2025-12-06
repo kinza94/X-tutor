@@ -1,8 +1,11 @@
-streamlit
-pandas
-numpy
 scikit-learn
 matplotlib
 seaborn
 plotly
 joblib
+streamlit
+sympy
+PyPDF2
+pdfplumber
+python-docx
+pandas

@@ -242,68 +242,136 @@ def solve_equation_local(question: str):
     q = question.strip()
     if not q:
         return None
+
+    # Allow "solve x+2=5" style
     if q.lower().startswith("solve"):
-        parts = q.split(None,1)
-        if len(parts)>1:
+        parts = q.split(None, 1)
+        if len(parts) > 1:
             q = parts[1].strip()
+
+    # If no "=", try numeric evaluation
     if "=" not in q:
-        # numeric evaluation
         try:
             if SYMPY_AVAILABLE:
                 v = sp.N(sp.sympify(q))
-                return {"answer": str(v), "steps":[f"Evaluate {q} = {v}"]}
+                return {"answer": str(v), "steps": [f"Evaluate {q} = {v}"]}
             else:
                 v = eval(q, {"__builtins__": None}, {})
-                return {"answer": str(v), "steps":[f"Evaluate {q} = {v}"]}
+                return {"answer": str(v), "steps": [f"Evaluate {q} = {v}"]}
         except Exception:
             return None
-    left, right = q.split("=",1)
-    left = left.strip(); right = right.strip()
+
+    left, right = q.split("=", 1)
+    left = left.strip()
+    right = right.strip()
+
+    # Try SymPy first
     if SYMPY_AVAILABLE:
         try:
             left_e = sp.sympify(left)
             right_e = sp.sympify(right)
             syms = list(left_e.free_symbols.union(right_e.free_symbols))
             if not syms:
-                lval = sp.N(left_e); rval = sp.N(right_e)
+                lval = sp.N(left_e)
+                rval = sp.N(right_e)
                 steps = [f"{left} = {right}", f"Left = {lval}", f"Right = {rval}"]
-                return {"answer": "True" if sp.Eq(lval, rval) else "False", "steps": steps}
+                return {
+                    "answer": "True" if sp.Eq(lval, rval) else "False",
+                    "steps": steps,
+                }
             var = syms[0]
             sol = sp.solve(sp.Eq(left_e, right_e), var)
             steps = [f"Solve: {left} = {right}", f"Variable: {var}", f"Solution: {sol}"]
             return {"answer": f"{var} = {sol}", "steps": steps}
         except Exception:
+            # fall back to pure-Python
             pass
-    # pure python linear
+
+    # -------- PURE PYTHON LINEAR SOLVER (yeh humne detail wala banaaya) --------
     var = _find_variable(left, right)
     if not var:
+        # maybe numeric equality
         try:
             lval = Fraction(left)
             rval = Fraction(right)
             steps = [f"{left} = {right}", f"Left = {lval}", f"Right = {rval}"]
-            return {"answer": "True" if lval == rval else "False", "steps": steps}
+            return {
+                "answer": "True" if lval == rval else "False",
+                "steps": steps,
+            }
         except Exception:
             return None
+
+    # Coefficients from both sides
     try:
         coef_l, const_l = _coeff_and_const_from_expr(left, var)
         coef_r, const_r = _coeff_and_const_from_expr(right, var)
     except Exception:
         return None
-    a = coef_l - coef_r
-    c = const_l - const_r
-    steps = [f"Start: {left} = {right}", f"Identify unknown: {var}", f"Left coef: {coef_l}, Left const: {const_l}", f"Right coef: {coef_r}, Right const: {const_r}"]
+
+    # a x + c = 0 form: a = coef_l - coef_r, c = const_l - const_r
+    a = coef_l - coef_r                  # combined x coefficient
+    c = const_l - const_r                # combined constant on LHS
+    N = -c                               # RHS after moving constant: right_const - left_const
+
+    steps: List[str] = []
+
+    # Step 1: Start
+    steps.append(f"Step 1: Start with the equation: {left} = {right}")
+
+    # Step 2: Combine like terms
+    steps.append(
+        f"Step 2: Combine like terms on each side: "
+        f"{coef_l}{var} + {const_l} = {coef_r}{var} + {const_r}"
+    )
+
+    # Step 3: Move x-terms left, constants right
+    steps.append(
+        f"Step 3: Move x-terms to the left and constants to the right: "
+        f"({coef_l} - {coef_r}){var} = {const_r} - {const_l}"
+    )
+
+    # Step 4: Simplify
+    steps.append(f"Step 4: Simplify: {a}{var} = {N}")
+
+    # Special cases
     if a == 0:
         if c == 0:
-            steps.append("0 = 0 → Infinite solutions.")
+            steps.append("0 = 0 → Infinite solutions (any value of the variable).")
             return {"answer": f"Infinite solutions (any {var})", "steps": steps}
         else:
-            steps.append("Variable terms cancel but constants differ → No solution.")
+            steps.append(
+                "Variable terms cancel but constants are different → No solution."
+            )
             return {"answer": "No solution", "steps": steps}
-    sol = -c / a
-    steps.append(f"Form: {a}*{var} + ({c}) = 0")
-    steps.append(f"Move constant: {a}*{var} = {-c}")
-    steps.append(f"Divide: {var} = {sol}")
+
+    # Step 5: Show division step as you wanted
+    steps.append(
+        f"Step 5: Divide both sides by {a}: {var} = {N} / {a}"
+    )
+
+    # Factor breakdown only if integers and divisible
+    if (
+        isinstance(a, Fraction)
+        and isinstance(N, Fraction)
+        and a.denominator == 1
+        and N.denominator == 1
+    ):
+        Ai = a.numerator
+        Ni = N.numerator
+        if Ai != 0 and Ni % Ai == 0:
+            k = Ni // Ai
+            steps.append("Factor breakdown:")
+            steps.append(f"{Ni} → {Ai} × {k}")
+            steps.append(f"{Ai} → {Ai} × 1")
+            steps.append(f"So {var} = {k}")
+            return {"answer": f"{var} = {k}", "steps": steps}
+
+    # General fraction case
+    sol = N / a
+    steps.append(f"Simplify: {var} = {sol}")
     return {"answer": f"{var} = {sol}", "steps": steps}
+
 
 # ---------------------------
 # PDF helpers (best-effort)
