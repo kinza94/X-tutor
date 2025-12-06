@@ -78,23 +78,7 @@ def log_query(entry: dict):
 # Plugin bootstrapping
 # ---------------------------
 TOPICS_DIR = os.path.join(os.path.dirname(__file__), "topics")
-def ensure_topics_folder():
-    os.makedirs(TOPICS_DIR, exist_ok=True)
-    init = os.path.join(TOPICS_DIR, "__init__.py")
-    if not os.path.exists(init):
-        with open(init, "w", encoding="utf-8") as f:
-            f.write("# topics package\n")
-    # create sample linear plugin
-    linear_path = os.path.join(TOPICS_DIR, "algebra_linear.py")
-    if not os.path.exists(linear_path):
-        with open(linear_path, "w", encoding="utf-8") as f:
-            f.write(ALGEBRA_LINEAR_PLUGIN)
-    quad_path = os.path.join(TOPICS_DIR, "quadratic.py")
-    if not os.path.exists(quad_path):
-        with open(quad_path, "w", encoding="utf-8") as f:
-            f.write(QUADRATIC_PLUGIN)
 
-# Plugin example texts (kept as constants below to avoid repetition)
 ALGEBRA_LINEAR_PLUGIN = r'''# topics/algebra_linear.py
 import re
 import sympy as sp
@@ -103,30 +87,16 @@ name = "Algebra — Linear"
 tags = ["algebra", "linear", "equation"]
 
 def can_handle(question: str) -> bool:
+    # We'll generally let the main app handle simple linear equations,
+    # so we keep this conservative.
     q = question.strip().lower()
     if "=" not in q:
         return False
+    # Avoid advanced stuff in this plugin; leave to main solver.
     if any(tok in q for tok in ["sin(", "cos(", "integral", "d/d", "log("]):
         return False
-    return bool(re.search(r"[a-zA-Z]", q))
-
-def explain(question: str, level: str = "Intermediate", context: str = ""):
-    try:
-        q = question.strip()
-        if q.lower().startswith("solve "):
-            q = q.split(None,1)[1]
-        left, right = q.split("=",1)
-        left_e = sp.sympify(left)
-        right_e = sp.sympify(right)
-        syms = list(left_e.free_symbols.union(right_e.free_symbols))
-        if not syms:
-            return {"answer": f"{sp.N(left_e)} vs {sp.N(right_e)}", "steps":[f"{left} = {right}", f"Left = {sp.N(left_e)}", f"Right = {sp.N(right_e)}"], "meta":{"key_idea":"numeric"}}
-        var = syms[0]
-        sol = sp.solve(sp.Eq(left_e, right_e), var)
-        steps = [f"Solve {left} = {right}", f"Identify variable: {var}", f"Solution: {sol}"]
-        return {"answer": f\"{var} = {sol}\", "steps": steps, "meta": {"key_idea":"isolate variable"}}
-    except Exception as e:
-        return {"answer": f"Parse error: {e}", "steps": [str(e)], "meta": {}}
+    # This plugin can be used as a fallback if needed.
+    return False  # effectively disabled; main app handles linear
 '''
 
 QUADRATIC_PLUGIN = r'''# topics/quadratic.py
@@ -152,14 +122,37 @@ def explain(question: str, level: str = "Intermediate", context: str = ""):
         right_e = sp.sympify(right)
         syms = list(left_e.free_symbols.union(right_e.free_symbols))
         if not syms:
-            return {"answer": f"{sp.N(left_e)} vs {sp.N(right_e)}", "steps":[f"{left} = {right}", f"Left = {sp.N(left_e)}", f"Right = {sp.N(right_e)}"], "meta":{"key_idea":"numeric"}}
+            return {"answer": f"{sp.N(left_e)} vs {sp.N(right_e)}",
+                    "steps":[f"{left} = {right}",
+                             f"Left = {sp.N(left_e)}",
+                             f"Right = {sp.N(right_e)}"],
+                    "meta":{"key_idea":"numeric"}}
         var = syms[0]
         sol = sp.solve(sp.Eq(left_e, right_e), var)
-        steps = [f"Equation: {left} = {right}", f"Variable: {var}", f"Roots: {sol}"]
-        return {"answer": f"{var} = {sol}", "steps": steps, "meta": {"key_idea":"quadratic formula"}}
+        steps = [f"Equation: {left} = {right}",
+                 f"Variable: {var}",
+                 f"Roots: {sol}"]
+        return {"answer": f"{var} = {sol}",
+                "steps": steps,
+                "meta": {"key_idea":"quadratic formula"}}
     except Exception as e:
         return {"answer": f"Parse error: {e}", "steps": [str(e)], "meta": {}}
 '''
+
+def ensure_topics_folder():
+    os.makedirs(TOPICS_DIR, exist_ok=True)
+    init = os.path.join(TOPICS_DIR, "__init__.py")
+    if not os.path.exists(init):
+        with open(init, "w", encoding="utf-8") as f:
+            f.write("# topics package\n")
+    linear_path = os.path.join(TOPICS_DIR, "algebra_linear.py")
+    if not os.path.exists(linear_path):
+        with open(linear_path, "w", encoding="utf-8") as f:
+            f.write(ALGEBRA_LINEAR_PLUGIN)
+    quad_path = os.path.join(TOPICS_DIR, "quadratic.py")
+    if not os.path.exists(quad_path):
+        with open(quad_path, "w", encoding="utf-8") as f:
+            f.write(QUADRATIC_PLUGIN)
 
 # Ensure topics/plugins exist
 ensure_topics_folder()
@@ -188,10 +181,20 @@ def load_plugins(package_name: str = "topics"):
     return plugins
 
 def route_question(question: str, plugins: List, preferred_topic: Optional[str] = None):
+    """
+    Route only *non-simple-linear* things to plugins.
+    Linear equations are handled by our own detailed solver.
+    """
     q = question.strip().lower()
+
+    # if it's a simple linear equation (one variable, no ^2 etc.), skip plugins
+    if "=" in q and re.search(r"[a-zA-Z]", q) and "^" not in q and "squared" not in q and "²" not in q:
+        return None
+
     if preferred_topic and preferred_topic != "Auto-detect":
         for p in plugins:
-            if preferred_topic.lower() in getattr(p, "name", "").lower() or preferred_topic.lower() in getattr(p, "tags", []):
+            if preferred_topic.lower() in getattr(p, "name", "").lower() or \
+               preferred_topic.lower() in getattr(p, "tags", []):
                 return p
     candidates = [p for p in plugins if p.can_handle(question)]
     return candidates[0] if candidates else None
@@ -199,7 +202,7 @@ def route_question(question: str, plugins: List, preferred_topic: Optional[str] 
 PLUGINS = load_plugins()
 
 # ---------------------------
-# Local solver: SymPy + pure-Python fallback
+# Local solver helpers
 # ---------------------------
 def _split_terms(expr: str):
     s = expr.replace(" ", "")
@@ -208,16 +211,16 @@ def _split_terms(expr: str):
     return re.findall(r"[+-][^+-]+", s)
 
 def _coeff_and_const_from_expr(expr: str, var: str):
-    coef = Fraction(0,1)
-    const = Fraction(0,1)
+    coef = Fraction(0, 1)
+    const = Fraction(0, 1)
     terms = _split_terms(expr)
     for t in terms:
         if var in t:
             part = t.replace(var, "").replace("*", "")
             if part in ["+", ""]:
-                c = Fraction(1,1)
+                c = Fraction(1, 1)
             elif part == "-":
-                c = Fraction(-1,1)
+                c = Fraction(-1, 1)
             else:
                 try:
                     c = Fraction(part)
@@ -233,12 +236,72 @@ def _coeff_and_const_from_expr(expr: str, var: str):
 
 def _find_variable(expr1: str, expr2: str):
     m = re.search(r"[a-zA-Z]", expr1)
-    if m: return m.group(0)
+    if m:
+        return m.group(0)
     m = re.search(r"[a-zA-Z]", expr2)
-    if m: return m.group(0)
+    if m:
+        return m.group(0)
     return None
 
+# ---------------------------
+# Simple NLP: text → equation (very basic)
+# ---------------------------
+def text_to_equation(text: str, var: str = "x") -> Optional[str]:
+    """
+    Very simple rule-based NLP:
+    Handles sentences like:
+      - "a number plus 5 is 12"
+      - "5 more than a number is 9"
+      - "twice a number plus 3 is 11"
+      - "5 less than a number is 10"
+    Returns algebraic equation string or None.
+    """
+    t = text.lower().strip()
+
+    # If user already gave equation, don't touch
+    if "=" in t:
+        return None
+
+    nums = re.findall(r"-?\d+", t)
+    nums = [int(n) for n in nums] if nums else []
+    if not nums:
+        return None
+
+    coef = 1
+    if "twice" in t or "2 times" in t or "two times" in t:
+        coef = 2
+    elif "thrice" in t or "3 times" in t or "three times" in t:
+        coef = 3
+
+    # plus / more than / increased by
+    if "number" in t and any(k in t for k in ["plus", "more than", "add", "increased by", "sum of"]):
+        if len(nums) >= 2:
+            b, c = nums[-2], nums[-1]  # last two numbers
+            return f"{coef}{var} + {b} = {c}"
+
+    # minus / less than / decreased by
+    if "number" in t and any(k in t for k in ["less than", "minus", "decreased by", "subtracted from"]):
+        if len(nums) >= 2:
+            b, c = nums[-2], nums[-1]
+            # assume: "b less than a number is c" -> x - b = c
+            return f"{coef}{var} - {b} = {c}"
+
+    # "twice a number is 14"
+    if "number" in t and any(k in t for k in ["times", "multiplied by"]) and \
+       "plus" not in t and "minus" not in t:
+        c = nums[-1]
+        return f"{coef}{var} = {c}"
+
+    return None
+
+# ---------------------------
+# Local linear equation solver with detailed steps
+# ---------------------------
 def solve_equation_local(question: str):
+    """
+    Detailed step-by-step solver for linear equations.
+    Also handles numeric evaluation and simple NLP word problems.
+    """
     q = question.strip()
     if not q:
         return None
@@ -249,15 +312,19 @@ def solve_equation_local(question: str):
         if len(parts) > 1:
             q = parts[1].strip()
 
-    # If no "=", try numeric evaluation
+    # First try to convert natural language -> equation
+    nlp_eq = text_to_equation(q)
+    if nlp_eq is not None:
+        q = nlp_eq
+
+    # If still no "=", try numeric expression
     if "=" not in q:
         try:
             if SYMPY_AVAILABLE:
                 v = sp.N(sp.sympify(q))
-                return {"answer": str(v), "steps": [f"Evaluate {q} = {v}"]}
             else:
                 v = eval(q, {"__builtins__": None}, {})
-                return {"answer": str(v), "steps": [f"Evaluate {q} = {v}"]}
+            return {"answer": str(v), "steps": [f"Evaluate {q} = {v}"]}
         except Exception:
             return None
 
@@ -265,32 +332,9 @@ def solve_equation_local(question: str):
     left = left.strip()
     right = right.strip()
 
-    # Try SymPy first
-    if SYMPY_AVAILABLE:
-        try:
-            left_e = sp.sympify(left)
-            right_e = sp.sympify(right)
-            syms = list(left_e.free_symbols.union(right_e.free_symbols))
-            if not syms:
-                lval = sp.N(left_e)
-                rval = sp.N(right_e)
-                steps = [f"{left} = {right}", f"Left = {lval}", f"Right = {rval}"]
-                return {
-                    "answer": "True" if sp.Eq(lval, rval) else "False",
-                    "steps": steps,
-                }
-            var = syms[0]
-            sol = sp.solve(sp.Eq(left_e, right_e), var)
-            steps = [f"Solve: {left} = {right}", f"Variable: {var}", f"Solution: {sol}"]
-            return {"answer": f"{var} = {sol}", "steps": steps}
-        except Exception:
-            # fall back to pure-Python
-            pass
-
-    # -------- PURE PYTHON LINEAR SOLVER (yeh humne detail wala banaaya) --------
     var = _find_variable(left, right)
     if not var:
-        # maybe numeric equality
+        # maybe just numeric equality
         try:
             lval = Fraction(left)
             rval = Fraction(right)
@@ -302,55 +346,45 @@ def solve_equation_local(question: str):
         except Exception:
             return None
 
-    # Coefficients from both sides
+    # get coefficients on both sides
     try:
         coef_l, const_l = _coeff_and_const_from_expr(left, var)
         coef_r, const_r = _coeff_and_const_from_expr(right, var)
     except Exception:
         return None
 
-    # a x + c = 0 form: a = coef_l - coef_r, c = const_l - const_r
-    a = coef_l - coef_r                  # combined x coefficient
-    c = const_l - const_r                # combined constant on LHS
-    N = -c                               # RHS after moving constant: right_const - left_const
+    # a x + c = 0 form  ->  a = coef_l - coef_r,  c = const_l - const_r
+    a = coef_l - coef_r          # combined x coefficient
+    c = const_l - const_r        # combined constant on LHS
+    N = -c                       # RHS constant after moving
 
     steps: List[str] = []
 
-    # Step 1: Start
+    # Step-by-step explanation
     steps.append(f"Step 1: Start with the equation: {left} = {right}")
-
-    # Step 2: Combine like terms
     steps.append(
         f"Step 2: Combine like terms on each side: "
         f"{coef_l}{var} + {const_l} = {coef_r}{var} + {const_r}"
     )
-
-    # Step 3: Move x-terms left, constants right
     steps.append(
         f"Step 3: Move x-terms to the left and constants to the right: "
         f"({coef_l} - {coef_r}){var} = {const_r} - {const_l}"
     )
-
-    # Step 4: Simplify
     steps.append(f"Step 4: Simplify: {a}{var} = {N}")
 
-    # Special cases
+    # special cases
     if a == 0:
         if c == 0:
-            steps.append("0 = 0 → Infinite solutions (any value of the variable).")
+            steps.append("Both sides reduce to 0 = 0 → infinitely many solutions.")
             return {"answer": f"Infinite solutions (any {var})", "steps": steps}
         else:
-            steps.append(
-                "Variable terms cancel but constants are different → No solution."
-            )
+            steps.append("x-terms cancel but constants differ → no solution.")
             return {"answer": "No solution", "steps": steps}
 
-    # Step 5: Show division step as you wanted
-    steps.append(
-        f"Step 5: Divide both sides by {a}: {var} = {N} / {a}"
-    )
+    # normal case
+    steps.append(f"Step 5: Divide both sides by {a}: {var} = {N}/{a}")
 
-    # Factor breakdown only if integers and divisible
+    # Factor breakdown if integer division possible
     if (
         isinstance(a, Fraction)
         and isinstance(N, Fraction)
@@ -367,11 +401,10 @@ def solve_equation_local(question: str):
             steps.append(f"So {var} = {k}")
             return {"answer": f"{var} = {k}", "steps": steps}
 
-    # General fraction case
+    # otherwise leave as fraction
     sol = N / a
     steps.append(f"Simplify: {var} = {sol}")
     return {"answer": f"{var} = {sol}", "steps": steps}
-
 
 # ---------------------------
 # PDF helpers (best-effort)
@@ -410,15 +443,9 @@ def load_pdf_pages_from_fileobj(file_obj):
             pass
     return pages
 
-
+# ---------------------------
 # Worksheet generator
-
-
-import random
-import re
-import math
-
-# --- MAIN GENERATOR FUNCTION ---
+# ---------------------------
 def generate_questions(topic, n):
     """Generate worksheet questions based on selected topic."""
     if topic == "Ratio":
@@ -453,26 +480,20 @@ def generate_questions(topic, n):
     # fallback
     return [f"Question {i+1}" for i in range(n)]
 
-
-# --- RATIO QUESTIONS (your code improved) ---
 def generate_ratio_questions(n):
     qs = []
     examples = [(16, 32), (160, 200), (12, 18), (5, 20), (9, 12)]
 
-    # use examples first
     for a, b in examples:
         if len(qs) < n:
             qs.append(f"Find the ratio of {a} and {b}.")
 
-    # fill remaining
     while len(qs) < n:
         a, b = random.randint(2, 200), random.randint(2, 200)
         qs.append(f"Find the ratio of {a} and {b}.")
 
     return qs
 
-
-# --- RATIO ANSWER CALCULATOR (clean & safe) ---
 def simplify_ratio_text(q_text):
     nums = re.findall(r"-?\d+", q_text)
     if len(nums) >= 2:
@@ -495,7 +516,8 @@ def call_gpt_simple(prompt: str, max_tokens:int=400, temperature:float=0.0):
     if openai_client_v1 is not None:
         resp = openai_client_v1.chat.completions.create(
             model=LLM_MODEL,
-            messages=[{"role":"system","content":"You are X-Tutor."}, {"role":"user","content":prompt}],
+            messages=[{"role":"system","content":"You are X-Tutor."},
+                      {"role":"user","content":prompt}],
             temperature=temperature,
             max_tokens=max_tokens
         )
@@ -506,7 +528,8 @@ def call_gpt_simple(prompt: str, max_tokens:int=400, temperature:float=0.0):
     elif openai_module_old is not None:
         resp = openai_module_old.ChatCompletion.create(
             model=LLM_MODEL,
-            messages=[{"role":"system","content":"You are X-Tutor."}, {"role":"user","content":prompt}],
+            messages=[{"role":"system","content":"You are X-Tutor."},
+                      {"role":"user","content":prompt}],
             temperature=temperature,
             max_tokens=max_tokens
         )
@@ -517,12 +540,40 @@ def call_gpt_simple(prompt: str, max_tokens:int=400, temperature:float=0.0):
     else:
         raise RuntimeError("OpenAI client missing")
 
+# Prompt builder for LLM tutor (you can hook this in UI later)
+def build_tutor_prompt(question: str, level: str, context_text: str = "") -> str:
+    """
+    Prompt that turns the LLM into a step-by-step tutor.
+    """
+    prompt = f"""
+You are X-Tutor, a friendly {level.lower()}-level teacher.
+
+Student question:
+{question}
+
+{("Here is relevant textbook content:\n" + context_text) if context_text else ""}
+
+Your job:
+1. Restate the question in simple words.
+2. Briefly explain the key concept.
+3. Solve step-by-step (number your steps).
+4. At the end, clearly state:
+   - Final answer
+   - One common mistake students make
+   - One short tip to remember the concept.
+
+Use clear headings and short sentences.
+If there is math, show it neatly.
+"""
+    return prompt.strip()
+
 # ---------------------------
 # UI: Streamlit
 # ---------------------------
 def run_streamlit():
     st.set_page_config(page_title="X-Tutor — Modular", layout="wide")
     st.title("🧠 X-Tutor — Modular & Extensible")
+
     # Sidebar
     with st.sidebar:
         st.header("Settings")
@@ -531,6 +582,7 @@ def run_streamlit():
         level = st.radio("Explain level", ["Beginner","Intermediate","Advanced"], index=1)
         show_meta = st.checkbox("Show meta/notes", value=True)
         use_gpt_ws = st.checkbox("Use GPT for worksheet generation (tokens)", value=False)
+        use_llm_tutor = st.checkbox("Use LLM Tutor (if API key set)", value=False)
         debug_mode = st.checkbox("Debug info", value=False)
         st.markdown("---")
         if uploaded_pdfs:
@@ -561,10 +613,13 @@ def run_streamlit():
 
     left_col, right_col = st.columns([2,1])
     with left_col:
-        question = st.text_area("Type your question here:", height=160, placeholder="e.g. x+2=5 or 2x+5=20")
+        question = st.text_area(
+            "Type your question here:",
+            height=160,
+            placeholder="e.g. x+2=5 or 2x+5=20 or 'a number plus 3 is 10'"
+        )
         st.markdown("### Worksheet generator")
 
-        # Updated topic list
         ws_topic = st.selectbox(
             "Worksheet topic",
             ["Ratio", "Multiplication", "Fractions", "Percentage", "Word Problems"]
@@ -573,20 +628,25 @@ def run_streamlit():
         ws_n = st.number_input("Number of questions", min_value=5, max_value=50, value=12)
 
         if st.button("Preview worksheet"):
-
-            # NEW universal generator
             qs = generate_questions(ws_topic, ws_n)
-
             st.markdown("### Preview:")
             for i, q in enumerate(qs, start=1):
                 st.write(f"{i}. {q}")
 
         use_context = st.checkbox("Use selected textbook page as context", value=True)
         if pdf_docs:
-            selected_pdf_idx = st.selectbox("Select textbook", options=list(range(len(pdf_docs))), format_func=lambda i: pdf_docs[i]["name"])
+            selected_pdf_idx = st.selectbox(
+                "Select textbook",
+                options=list(range(len(pdf_docs))),
+                format_func=lambda i: pdf_docs[i]["name"]
+            )
             pages = pdf_docs[selected_pdf_idx]["pages"]
             if pages:
-                selected_page_num = st.selectbox("Select page", options=list(range(1, len(pages)+1)), index=0)
+                selected_page_num = st.selectbox(
+                    "Select page",
+                    options=list(range(1, len(pages)+1)),
+                    index=0
+                )
                 page_text = pages[selected_page_num-1]
                 st.write("Page preview:")
                 st.write(page_text[:1000] + ("..." if len(page_text)>1000 else ""))
@@ -607,31 +667,49 @@ def run_streamlit():
                 context_text = ""
                 if use_context and selected_pdf_idx is not None and selected_page_num is not None:
                     context_text = pdf_docs[selected_pdf_idx]["pages"][selected_page_num-1]
-                # routing to plugin
+
+                # 1) Try plugin (e.g., quadratic)
                 plugin = route_question(question, PLUGINS)
+
                 if plugin is None:
-                    # try local solver
+                    # Local linear / numeric solver
                     fb = solve_equation_local(question)
                     if fb:
-                        st.subheader("Final Answer")
-                        st.success(fb.get("answer",""))
+                        st.subheader("Final Answer (Local Solver)")
+                        st.success(fb.get("answer", ""))
                         st.subheader("Steps")
-                        for s in fb.get("steps",[]): st.write("-", s)
+                        for s in fb.get("steps", []):
+                            st.write("-", s)
                     else:
                         st.error("No plugin matched and no local solution available.")
                 else:
                     try:
                         res = plugin.explain(question, level=level, context=context_text)
-                        st.subheader("Final Answer")
+                        st.subheader("Final Answer (Plugin)")
                         st.success(res.get("answer",""))
                         st.subheader("Step-by-step Explanation")
-                        for s in res.get("steps",[]): st.write("-", s)
+                        for s in res.get("steps",[]):
+                            st.write("-", s)
                         if show_meta and res.get("meta"):
                             st.subheader("Notes")
                             for k,v in res.get("meta",{}).items():
                                 st.write(f"- {k}: {v}")
                     except Exception as e:
                         st.error(f"Plugin error: {e}")
+
+                # 2) Optional LLM tutor explanation (separate section)
+                if use_llm_tutor:
+                    if not OPENAI_AVAILABLE:
+                        st.warning("OPENAI_API_KEY not set. LLM Tutor disabled.")
+                    else:
+                        try:
+                            tutor_prompt = build_tutor_prompt(question, level, context_text)
+                            llm_answer = call_gpt_simple(tutor_prompt, max_tokens=700, temperature=0.2)
+                            st.markdown("---")
+                            st.subheader("🧠 X-Tutor (LLM) — Answer & Explanation")
+                            st.write(llm_answer)
+                        except Exception as e:
+                            st.error(f"LLM Tutor error: {e}")
 
     with right_col:
         st.markdown("### Recent Q&A")
@@ -661,9 +739,12 @@ def run_streamlit():
                             results.append({'question': q, 'answer': answers})
                         res_df = pd.DataFrame(results)
                         csv_out = res_df.to_csv(index=False)
-                        st.download_button("Download results CSV", data=csv_out, file_name='batch_results.csv',
-                                           mime='text/csv')
-
+                        st.download_button(
+                            "Download results CSV",
+                            data=csv_out,
+                            file_name='batch_results.csv',
+                            mime='text/csv'
+                        )
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
 
@@ -680,7 +761,7 @@ def run_streamlit():
 def run_cli():
     print("X-Tutor — CLI mode (local solver)")
     print(f"SymPy available: {SYMPY_AVAILABLE}")
-    print("Examples: x+2=5   2x+5=20   solve x^2 - 5x + 6 = 0")
+    print("Examples: x+2=5   2x+5=20   'a number plus 3 is 10'")
     print("Type 'exit' or Ctrl+C to quit.")
     while True:
         try:
@@ -693,7 +774,7 @@ def run_cli():
         if q.lower() in ("exit","quit"):
             print("Goodbye!")
             return
-        # If plugin matches
+
         plugin = route_question(q, PLUGINS)
         if plugin:
             try:
