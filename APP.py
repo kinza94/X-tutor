@@ -13,7 +13,7 @@ from io import BytesIO
 from fractions import Fraction
 from typing import List, Dict, Optional
 
-# Attempt rich libraries (optional)
+# Attempt rich libraries
 try:
     import streamlit as st
     STREAMLIT_AVAILABLE = True
@@ -244,12 +244,12 @@ def _find_variable(expr1: str, expr2: str):
     return None
 
 # ---------------------------
-# Simple NLP: text → equation (very basic)
-# ---------------------------
+# Simple NLP: text → equation
 def text_to_equation(text: str, var: str = "x") -> Optional[str]:
     """
     Very simple rule-based NLP:
     Handles sentences like:
+      - "a number add 6 is 10"
       - "a number plus 5 is 12"
       - "5 more than a number is 9"
       - "twice a number plus 3 is 11"
@@ -572,7 +572,7 @@ If there is math, show it neatly.
 # ---------------------------
 def run_streamlit():
     st.set_page_config(page_title="X-Tutor — Modular", layout="wide")
-    st.title("🧠 X-Tutor — Modular & Extensible")
+    st.title("🧠 X-Tutor ")
 
     # Sidebar
     with st.sidebar:
